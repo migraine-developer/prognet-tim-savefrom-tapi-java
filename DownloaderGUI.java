@@ -1,4 +1,3 @@
-//GUI Utama
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -9,7 +8,6 @@ import javax.swing.table.JTableHeader;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -40,12 +38,14 @@ public class DownloaderGUI extends JFrame {
     private static final Font LABEL_FONT = new Font("Segoe UI", Font.BOLD, 14);
     private static final Font BASE_FONT = new Font("Segoe UI", Font.PLAIN, 14);
     private static final DateTimeFormatter HISTORY_FORMATTER = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
+    private YtDlpHelper.Handle currentYtHandle = null;
+    private boolean usingYtDlp = false;
 
     static {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) {
-            // Gunakan look and feel default jika gagal.
+
         }
     }
 
@@ -195,7 +195,6 @@ public class DownloaderGUI extends JFrame {
         updateHistoryActionState();
     }
 
-    // Getter biar kelas lain bisa ambil input pengguna nanti
     public JTextField getLinkField() {
         return linkField;
     }
@@ -413,13 +412,6 @@ public class DownloaderGUI extends JFrame {
         formGbc.gridy = row++;
         formGbc.insets = new Insets(0, 0, 20, 0);
         formPanel.add(formatBox, formGbc);
-
-        // formGbc.gridy = row++;
-        // formGbc.insets = new Insets(0, 0, 4, 0);
-        // formPanel.add(formatLabel, formGbc);
-        // formGbc.gridy = row++;
-        // formGbc.insets = new Insets(0, 0, 20, 0);
-        // formPanel.add(formatBox, formGbc);
 
         JLabel hintLabel = new JLabel("Tip: Pastikan folder tujuan memiliki ruang yang cukup.");
         hintLabel.setFont(BASE_FONT);
@@ -670,6 +662,128 @@ public class DownloaderGUI extends JFrame {
             return;
         }
 
+        if (YtDlpHelper.isYouTube(url) && (format != null)
+                && (format.equalsIgnoreCase("mp4") || format.equalsIgnoreCase("mp3"))) {
+
+            usingYtDlp = true;
+
+            setInputsEnabled(false);
+            progressPanel.setVisible(true);
+            progressBar.setVisible(true);
+            progressLabel.setVisible(true);
+            progressBar.setIndeterminate(true);
+            progressBar.setString(null);
+            progressLabel.setText("Menjalankan yt-dlp...");
+            showStatus("Mengunduh via yt-dlp...", TEXT_SECONDARY);
+            cancelButton.setEnabled(true);
+
+            YtDlpHelper.Observer ytObs = new YtDlpHelper.Observer() {
+                @Override
+                public void onStarted() {
+                    SwingUtilities.invokeLater(() -> {
+                        showStatus("Menghubungkan ke server (yt-dlp)...", TEXT_SECONDARY);
+                    });
+                }
+
+                @Override
+                public void onProgress(int percent, String rawLine) {
+                    SwingUtilities.invokeLater(() -> {
+                        progressPanel.setVisible(true);
+                        if (percent >= 0) {
+                            progressBar.setIndeterminate(false);
+                            progressBar.setValue(percent);
+                            progressBar.setString(percent + "%");
+                        } else {
+                            progressBar.setIndeterminate(true);
+                            progressBar.setString(null);
+                        }
+                        if (rawLine != null && !rawLine.isBlank()) {
+
+                            progressLabel.setText(rawLine);
+                        }
+                    });
+                }
+
+                @Override
+                public void onCompleted(Path producedFile) {
+                    SwingUtilities.invokeLater(() -> {
+                        usingYtDlp = false;
+                        currentYtHandle = null;
+                        setInputsEnabled(true);
+                        cancelButton.setEnabled(false);
+
+                        progressBar.setIndeterminate(false);
+                        progressBar.setValue(100);
+                        progressBar.setString("100%");
+                        progressLabel.setText("Selesai");
+
+                        showStatus(
+                                "Unduhan selesai: "
+                                        + (producedFile != null ? producedFile.getFileName() : (fileName + extension)),
+                                STATUS_SUCCESS);
+
+                        String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
+                        String dest = (producedFile != null ? producedFile.toString()
+                                : directory.resolve(fileName + extension).toString());
+                        addHistoryEntry(fileName, format, dest, completedAt, "Berhasil");
+
+                        resetDownloadState();
+                    });
+                }
+
+                @Override
+                public void onCancelled() {
+                    SwingUtilities.invokeLater(() -> {
+                        usingYtDlp = false;
+                        currentYtHandle = null;
+                        setInputsEnabled(true);
+                        cancelButton.setEnabled(false);
+
+                        progressBar.setIndeterminate(false);
+                        progressBar.setValue(0);
+                        progressBar.setString(null);
+                        progressLabel.setText("Unduhan dibatalkan.");
+
+                        showStatus("Unduhan dibatalkan.", TEXT_SECONDARY);
+
+                        String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
+                        addHistoryEntry(fileName, format, directory.toString(), completedAt, "Dibatalkan");
+
+                        resetDownloadState();
+                    });
+                }
+
+                @Override
+                public void onFailed(String message) {
+                    SwingUtilities.invokeLater(() -> {
+                        usingYtDlp = false;
+                        currentYtHandle = null;
+                        setInputsEnabled(true);
+                        cancelButton.setEnabled(false);
+
+                        progressBar.setIndeterminate(false);
+                        progressBar.setValue(0);
+                        progressBar.setString(null);
+                        progressLabel.setText("Unduhan dihentikan.");
+
+                        showStatus(message != null ? message : "Gagal mengunduh via yt-dlp.", STATUS_ERROR);
+
+                        String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
+                        addHistoryEntry(fileName, format, directory.toString(), completedAt, "Gagal");
+
+                        resetDownloadState();
+                    });
+                }
+            };
+
+            if (format.equalsIgnoreCase("mp4")) {
+                currentYtHandle = YtDlpHelper.downloadMp4(url, directory, fileName, ytObs);
+            } else {
+                currentYtHandle = YtDlpHelper.downloadMp3(url, directory, fileName, ytObs);
+            }
+            return;
+        }
+
         currentDownloadName = fileName;
         currentDownloadFormat = format != null ? format : "";
         currentDestination = destination;
@@ -721,6 +835,13 @@ public class DownloaderGUI extends JFrame {
     }
 
     private void cancelActiveDownload() {
+        if (usingYtDlp && currentYtHandle != null && !currentYtHandle.isDone()) {
+            cancelButton.setEnabled(false);
+            showStatus("Mencoba membatalkan unduhan (yt-dlp)...", TEXT_SECONDARY);
+            currentYtHandle.cancel();
+            return;
+        }
+
         if (currentDownload != null && !currentDownload.isDone()) {
             cancelButton.setEnabled(false);
             showStatus("Membatalkan unduhan...", TEXT_SECONDARY);
@@ -777,7 +898,7 @@ public class DownloaderGUI extends JFrame {
                 fileSize = Files.size(file);
             }
         } catch (IOException ignored) {
-            // best effort untuk mendapatkan ukuran file
+
         }
 
         progressBar.setIndeterminate(false);
