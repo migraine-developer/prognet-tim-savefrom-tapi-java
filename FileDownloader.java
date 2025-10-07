@@ -86,6 +86,9 @@ public final class FileDownloader {
         private volatile boolean done;
         private volatile boolean succeeded;
         private Future<?> future;
+        private volatile HttpURLConnection activeConnection;
+        private volatile InputStream currentInput;
+        private volatile OutputStream currentOutput;
 
         DownloadTask(String url, Path destination, DownloadObserver observer) {
             this.url = url;
@@ -95,7 +98,6 @@ public final class FileDownloader {
 
         @Override
         public void run() {
-            HttpURLConnection connection = null;
             boolean notifiedStart = false;
             try {
                 if (destination.getParent() != null) {
@@ -103,7 +105,8 @@ public final class FileDownloader {
                 }
 
                 URL targetUrl = URI.create(url).toURL();
-                connection = (HttpURLConnection) targetUrl.openConnection();
+                HttpURLConnection connection = (HttpURLConnection) targetUrl.openConnection();
+                this.activeConnection = connection;
                 connection.setInstanceFollowRedirects(true);
                 connection.setConnectTimeout(15_000);
                 connection.setReadTimeout(30_000);
@@ -118,27 +121,29 @@ public final class FileDownloader {
                 observer.onStarted(totalBytes);
                 notifiedStart = true;
 
-                try (InputStream input = new BufferedInputStream(connection.getInputStream());
-                        OutputStream output = new BufferedOutputStream(Files.newOutputStream(destination,
-                                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING))) {
+                InputStream rawInput = connection.getInputStream();
+                BufferedInputStream input = new BufferedInputStream(rawInput);
+                this.currentInput = input;
+                BufferedOutputStream output = new BufferedOutputStream(Files.newOutputStream(destination,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING));
+                this.currentOutput = output;
 
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    long downloaded = 0;
-                    int read;
+                byte[] buffer = new byte[BUFFER_SIZE];
+                long downloaded = 0;
+                int read;
 
-                    while ((read = input.read(buffer)) != -1) {
-                        if (cancelled.get() || Thread.currentThread().isInterrupted()) {
-                            observer.onCancelled(destination);
-                            cleanupPartialFile();
-                            return;
-                        }
-
-                        output.write(buffer, 0, read);
-                        downloaded += read;
-                        observer.onProgress(downloaded, totalBytes);
+                while ((read = input.read(buffer)) != -1) {
+                    if (cancelled.get() || Thread.currentThread().isInterrupted()) {
+                        observer.onCancelled(destination);
+                        cleanupPartialFile();
+                        return;
                     }
-                    output.flush();
+
+                    output.write(buffer, 0, read);
+                    downloaded += read;
+                    observer.onProgress(downloaded, totalBytes);
                 }
+                output.flush();
 
                 succeeded = true;
                 observer.onCompleted(destination);
@@ -161,9 +166,7 @@ public final class FileDownloader {
                 cleanupPartialFile();
             } finally {
                 done = true;
-                if (connection != null) {
-                    connection.disconnect();
-                }
+                closeResources();
                 if (!notifiedStart && !cancelled.get() && !succeeded) {
                     observer.onFailed(DownloadError.GENERAL_FAILURE,
                             new IllegalStateException("Unduhan gagal dimulai."));
@@ -173,8 +176,11 @@ public final class FileDownloader {
 
         @Override
         public void cancel() {
-            if (cancelled.compareAndSet(false, true) && future != null) {
-                future.cancel(true);
+            if (cancelled.compareAndSet(false, true)) {
+                closeResources();
+                if (future != null) {
+                    future.cancel(true);
+                }
             }
         }
 
@@ -197,6 +203,32 @@ public final class FileDownloader {
                 Files.deleteIfExists(destination);
             } catch (IOException ignored) {
                 // Best-effort cleanup.
+            }
+        }
+
+        private void closeResources() {
+            OutputStream output = currentOutput;
+            currentOutput = null;
+            if (output != null) {
+                try {
+                    output.close();
+                } catch (IOException ignored) {
+                }
+            }
+
+            InputStream input = currentInput;
+            currentInput = null;
+            if (input != null) {
+                try {
+                    input.close();
+                } catch (IOException ignored) {
+                }
+            }
+
+            HttpURLConnection connection = activeConnection;
+            activeConnection = null;
+            if (connection != null) {
+                connection.disconnect();
             }
         }
 
