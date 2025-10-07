@@ -143,6 +143,13 @@ public final class FileDownloader {
                     downloaded += read;
                     observer.onProgress(downloaded, totalBytes);
                 }
+
+                if (cancelled.get() || Thread.currentThread().isInterrupted()) {
+                    observer.onCancelled(destination);
+                    cleanupPartialFile();
+                    return;
+                }
+
                 output.flush();
 
                 succeeded = true;

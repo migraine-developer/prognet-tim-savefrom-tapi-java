@@ -69,6 +69,30 @@ public class DownloaderGUI extends JFrame {
     private String currentDownloadFormat;
     private Path currentDestination;
 
+    // Adapter class untuk YtDlpHelper.Handle
+    private static class YtDlpDownloadHandle implements FileDownloader.DownloadHandle {
+        private final YtDlpHelper.Handle ytHandle;
+
+        public YtDlpDownloadHandle(YtDlpHelper.Handle ytHandle) {
+            this.ytHandle = ytHandle;
+        }
+
+        @Override
+        public void cancel() {
+            ytHandle.cancel();
+        }
+
+        @Override
+        public boolean isDone() {
+            return ytHandle.isDone();
+        }
+
+        @Override
+        public boolean isCompletedSuccessfully() {
+            return ytHandle.isDone(); // YtDlpHelper doesn't track success separately
+        }
+    }
+
     public DownloaderGUI() {
         setTitle("SaveFrom Tapi Java");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -363,7 +387,7 @@ public class DownloaderGUI extends JFrame {
 
         JLabel linkLabel = new JLabel("Download Link");
         JLabel pathLabel = new JLabel("File Path");
-        JLabel nameLabel = new JLabel("File Name");
+        JLabel nameLabel = new JLabel("File Name (opsional untuk YouTube)");
         JLabel formatLabel = new JLabel("File Format");
 
         styleFieldLabel(linkLabel);
@@ -621,10 +645,7 @@ public class DownloaderGUI extends JFrame {
             showStatus("File Path belum diisi.", STATUS_ERROR);
             return;
         }
-        if (fileName.isEmpty()) {
-            showStatus("File Name belum diisi.", STATUS_ERROR);
-            return;
-        }
+        // File name is now optional - will use video title if empty for YouTube URLs
 
         Path directory;
         try {
@@ -649,19 +670,7 @@ public class DownloaderGUI extends JFrame {
             return;
         }
 
-        String extension = (format != null && !format.isBlank()) ? "." + format.trim() : "";
-        Path destination = directory.resolve(fileName + extension);
-
-        try {
-            if (Files.exists(destination)) {
-                showStatus("File tujuan sudah ada. Gunakan nama lain.", STATUS_ERROR);
-                return;
-            }
-        } catch (SecurityException ex) {
-            showStatus("Tidak dapat memeriksa file tujuan karena izin.", STATUS_ERROR);
-            return;
-        }
-
+        // For YouTube URLs, we might not have a filename yet (will be extracted from title)
         if (YtDlpHelper.isYouTube(url) && (format != null)
                 && (format.equalsIgnoreCase("mp4") || format.equalsIgnoreCase("mp3"))) {
 
@@ -681,7 +690,22 @@ public class DownloaderGUI extends JFrame {
                 @Override
                 public void onStarted() {
                     SwingUtilities.invokeLater(() -> {
-                        showStatus("Menghubungkan ke server (yt-dlp)...", TEXT_SECONDARY);
+                        if (fileName == null || fileName.trim().isEmpty()) {
+                            progressLabel.setText("Mengekstrak judul video...");
+                            showStatus("Mengekstrak judul video...", TEXT_SECONDARY);
+                        } else {
+                            showStatus("Menghubungkan ke server (yt-dlp)...", TEXT_SECONDARY);
+                        }
+                    });
+                }
+
+                @Override
+                public void onTitleExtracted(String title) {
+                    SwingUtilities.invokeLater(() -> {
+                        currentDownloadName = title;
+                        nameField.setText(title); // Update UI to show extracted title
+                        progressLabel.setText("Judul diekstrak: " + title);
+                        showStatus("Memulai unduhan: " + title, TEXT_SECONDARY);
                     });
                 }
 
@@ -719,12 +743,12 @@ public class DownloaderGUI extends JFrame {
 
                         showStatus(
                                 "Unduhan selesai: "
-                                        + (producedFile != null ? producedFile.getFileName() : (fileName + extension)),
+                                        + (producedFile != null ? producedFile.getFileName() : fileName),
                                 STATUS_SUCCESS);
 
                         String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
                         String dest = (producedFile != null ? producedFile.toString()
-                                : directory.resolve(fileName + extension).toString());
+                                : directory.toString());
                         addHistoryEntry(fileName, format, dest, completedAt, "Berhasil");
 
                         resetDownloadState();
@@ -776,11 +800,32 @@ public class DownloaderGUI extends JFrame {
                 }
             };
 
+            String baseNameForDownload = (fileName != null && !fileName.trim().isEmpty()) ? fileName : null;
+            
             if (format.equalsIgnoreCase("mp4")) {
-                currentYtHandle = YtDlpHelper.downloadMp4(url, directory, fileName, ytObs);
+                currentYtHandle = YtDlpHelper.downloadMp4(url, directory, baseNameForDownload, ytObs);
             } else {
-                currentYtHandle = YtDlpHelper.downloadMp3(url, directory, fileName, ytObs);
+                currentYtHandle = YtDlpHelper.downloadMp3(url, directory, baseNameForDownload, ytObs);
             }
+            return;
+        }
+
+        // For non-YouTube URLs, filename is required
+        if (fileName.isEmpty()) {
+            showStatus("File Name belum diisi.", STATUS_ERROR);
+            return;
+        }
+
+        String extension = (format != null && !format.isBlank()) ? "." + format.trim() : "";
+        Path destination = directory.resolve(fileName + extension);
+
+        try {
+            if (Files.exists(destination)) {
+                showStatus("File tujuan sudah ada. Gunakan nama lain.", STATUS_ERROR);
+                return;
+            }
+        } catch (SecurityException ex) {
+            showStatus("Tidak dapat memeriksa file tujuan karena izin.", STATUS_ERROR);
             return;
         }
 
@@ -791,6 +836,7 @@ public class DownloaderGUI extends JFrame {
 
         prepareUiForDownload();
 
+        // Use regular FileDownloader for non-YouTube URLs
         FileDownloader.DownloadObserver observer = new FileDownloader.DownloadObserver() {
             @Override
             public void onStarted(long totalBytes) {
@@ -820,6 +866,8 @@ public class DownloaderGUI extends JFrame {
 
         currentDownload = FileDownloader.download(url, destination, observer);
     }
+
+
 
     private void prepareUiForDownload() {
         setInputsEnabled(false);
@@ -1032,23 +1080,10 @@ public class DownloaderGUI extends JFrame {
             showHistoryMessage("Tidak memiliki izin untuk membuka folder ini.");
             return;
         }
-
-        if (folder == null) {
+        if (folder == null || !Files.exists(folder)) {
             showHistoryMessage("Folder tidak ditemukan untuk entri ini.");
             return;
         }
-
-        try {
-            if (!Files.exists(folder)) {
-                showHistoryMessage("Folder tidak ditemukan: " + folder);
-                updateHistoryActionState();
-                return;
-            }
-        } catch (SecurityException ex) {
-            showHistoryMessage("Tidak memiliki izin untuk membuka folder ini.");
-            return;
-        }
-
         try {
             Desktop.getDesktop().open(folder.toFile());
         } catch (IOException | IllegalArgumentException ex) {
