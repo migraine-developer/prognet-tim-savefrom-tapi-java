@@ -94,7 +94,7 @@ public class DownloaderGUI extends JFrame {
     }
 
     public DownloaderGUI() {
-        setTitle("SaveFrom Tapi Java");
+        setTitle("Downloader");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1100, 720);
         setMinimumSize(new Dimension(1100, 720));
@@ -115,7 +115,7 @@ public class DownloaderGUI extends JFrame {
         cardGbc.weightx = 1;
         cardGbc.gridwidth = 2;
 
-        JLabel titleLabel = new JLabel("Youtube Content Downloader", SwingConstants.CENTER);
+        JLabel titleLabel = new JLabel("Downloader", SwingConstants.CENTER);
         titleLabel.setFont(TITLE_FONT);
         titleLabel.setForeground(TEXT_PRIMARY);
         cardGbc.gridy = 0;
@@ -140,7 +140,7 @@ public class DownloaderGUI extends JFrame {
         linkField = new JTextField(20);
         pathField = new JTextField(20);
         nameField = new JTextField(20);
-        formatBox = new JComboBox<>(new String[] { "mp4", "mp3" });
+        formatBox = new JComboBox<>(new String[] { "mp4", "mp3", "pdf" });
         downloadButton = new RoundedButton("Download", 24);
         cancelButton = new JButton("Cancel");
         progressBar = new JProgressBar(0, 100);
@@ -149,7 +149,7 @@ public class DownloaderGUI extends JFrame {
         openFileButton = new JButton("Buka File");
         openFolderButton = new JButton("Buka Folder");
 
-        styleTextField(linkField, "Tempelkan URL dari YouTube, Instagram, dll.");
+        styleTextField(linkField, "Tempelkan URL dari YouTube, File PDF, dll.");
         styleTextField(pathField, "Pilih folder tujuan atau ketik secara manual");
         styleTextField(nameField, "Nama file tanpa format");
         styleComboBox(formatBox);
@@ -670,154 +670,162 @@ public class DownloaderGUI extends JFrame {
             return;
         }
 
-        // For YouTube URLs, we might not have a filename yet (will be extracted from
-        // title)
-        if (YtDlpHelper.isYouTube(url) && (format != null)
-                && (format.equalsIgnoreCase("mp4") || format.equalsIgnoreCase("mp3"))) {
-
-            usingYtDlp = true;
-
-            setInputsEnabled(false);
-            progressPanel.setVisible(true);
-            progressBar.setVisible(true);
-            progressLabel.setVisible(true);
-            progressBar.setIndeterminate(true);
-            progressBar.setString(null);
-            progressLabel.setText("Menjalankan yt-dlp...");
-            showStatus("Mengunduh via yt-dlp...", TEXT_SECONDARY);
-            cancelButton.setEnabled(true);
-
-            YtDlpHelper.Observer ytObs = new YtDlpHelper.Observer() {
-                @Override
-                public void onStarted() {
-                    SwingUtilities.invokeLater(() -> {
-                        if (fileName == null || fileName.trim().isEmpty()) {
-                            progressLabel.setText("Mengekstrak judul video...");
-                            showStatus("Mengekstrak judul video...", TEXT_SECONDARY);
-                        } else {
-                            showStatus("Menghubungkan ke server (yt-dlp)...", TEXT_SECONDARY);
-                        }
-                    });
-                }
-
-                @Override
-                public void onTitleExtracted(String title) {
-                    SwingUtilities.invokeLater(() -> {
-                        currentDownloadName = title;
-                        nameField.setText(title); // Update UI to show extracted title
-                        progressLabel.setText("Judul diekstrak: " + title);
-                        showStatus("Memulai unduhan: " + title, TEXT_SECONDARY);
-                    });
-                }
-
-                @Override
-                public void onProgress(int percent, String rawLine) {
-                    SwingUtilities.invokeLater(() -> {
-                        progressPanel.setVisible(true);
-                        if (percent >= 0) {
-                            progressBar.setIndeterminate(false);
-                            progressBar.setValue(percent);
-                            progressBar.setString(percent + "%");
-                        } else {
-                            progressBar.setIndeterminate(true);
-                            progressBar.setString(null);
-                        }
-                        if (rawLine != null && !rawLine.isBlank()) {
-
-                            progressLabel.setText(rawLine);
-                        }
-                    });
-                }
-
-                @Override
-                public void onCompleted(Path producedFile) {
-                    SwingUtilities.invokeLater(() -> {
-                        usingYtDlp = false;
-                        currentYtHandle = null;
-                        setInputsEnabled(true);
-                        cancelButton.setEnabled(false);
-
-                        progressBar.setIndeterminate(false);
-                        progressBar.setValue(100);
-                        progressBar.setString("100%");
-                        progressLabel.setText("Selesai");
-
-                        showStatus(
-                                "Unduhan selesai: "
-                                        + (producedFile != null ? producedFile.getFileName() : fileName),
-                                STATUS_SUCCESS);
-
-                        String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
-                        String dest = (producedFile != null ? producedFile.toString()
-                                : directory.toString());
-                        addHistoryEntry(fileName, format, dest, completedAt, "Berhasil");
-
-                        resetDownloadState();
-                    });
-                }
-
-                @Override
-                public void onCancelled() {
-                    SwingUtilities.invokeLater(() -> {
-                        usingYtDlp = false;
-                        currentYtHandle = null;
-                        setInputsEnabled(true);
-                        cancelButton.setEnabled(false);
-
-                        progressBar.setIndeterminate(false);
-                        progressBar.setValue(0);
-                        progressBar.setString(null);
-                        progressLabel.setText("Unduhan dibatalkan.");
-
-                        showStatus("Unduhan dibatalkan.", TEXT_SECONDARY);
-
-                        String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
-                        addHistoryEntry(fileName, format, directory.toString(), completedAt, "Dibatalkan");
-
-                        resetDownloadState();
-                    });
-                }
-
-                @Override
-                public void onFailed(String message) {
-                    SwingUtilities.invokeLater(() -> {
-                        usingYtDlp = false;
-                        currentYtHandle = null;
-                        setInputsEnabled(true);
-                        cancelButton.setEnabled(false);
-
-                        progressBar.setIndeterminate(false);
-                        progressBar.setValue(0);
-                        progressBar.setString(null);
-                        progressLabel.setText("Unduhan dihentikan.");
-
-                        showStatus(message != null ? message : "Gagal mengunduh via yt-dlp.", STATUS_ERROR);
-
-                        String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
-                        addHistoryEntry(fileName, format, directory.toString(), completedAt, "Gagal");
-
-                        resetDownloadState();
-                    });
-                }
-            };
-
-            String baseNameForDownload = (fileName != null && !fileName.trim().isEmpty()) ? fileName : null;
-
-            if (format.equalsIgnoreCase("mp4")) {
-                currentYtHandle = YtDlpHelper.downloadMp4(url, directory, baseNameForDownload, ytObs);
-            } else {
-                currentYtHandle = YtDlpHelper.downloadMp3(url, directory, baseNameForDownload, ytObs);
+        // For YouTube URLs, only mp4/mp3 are valid via yt-dlp
+        if (YtDlpHelper.isYouTube(url)) {
+            if ("pdf".equalsIgnoreCase(format)) {
+                showStatus("Format PDF tidak didukung untuk YouTube. Pilih mp4 atau mp3.", STATUS_ERROR);
+                return;
             }
-            return;
+            if (format != null && (format.equalsIgnoreCase("mp4") || format.equalsIgnoreCase("mp3"))) {
+
+                usingYtDlp = true;
+
+                setInputsEnabled(false);
+                progressPanel.setVisible(true);
+                progressBar.setVisible(true);
+                progressLabel.setVisible(true);
+                progressBar.setIndeterminate(true);
+                progressBar.setString(null);
+                progressLabel.setText("Menjalankan yt-dlp...");
+                showStatus("Mengunduh via yt-dlp...", TEXT_SECONDARY);
+                cancelButton.setEnabled(true);
+
+                YtDlpHelper.Observer ytObs = new YtDlpHelper.Observer() {
+                    @Override
+                    public void onStarted() {
+                        SwingUtilities.invokeLater(() -> {
+                            if (fileName == null || fileName.trim().isEmpty()) {
+                                progressLabel.setText("Mengekstrak judul video...");
+                                showStatus("Mengekstrak judul video...", TEXT_SECONDARY);
+                            } else {
+                                showStatus("Menghubungkan ke server (yt-dlp)...", TEXT_SECONDARY);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onTitleExtracted(String title) {
+                        SwingUtilities.invokeLater(() -> {
+                            currentDownloadName = title;
+                            nameField.setText(title); // Update UI to show extracted title
+                            progressLabel.setText("Judul diekstrak: " + title);
+                            showStatus("Memulai unduhan: " + title, TEXT_SECONDARY);
+                        });
+                    }
+
+                    @Override
+                    public void onProgress(int percent, String rawLine) {
+                        SwingUtilities.invokeLater(() -> {
+                            progressPanel.setVisible(true);
+                            if (percent >= 0) {
+                                progressBar.setIndeterminate(false);
+                                progressBar.setValue(percent);
+                                progressBar.setString(percent + "%");
+                            } else {
+                                progressBar.setIndeterminate(true);
+                                progressBar.setString(null);
+                            }
+                            if (rawLine != null && !rawLine.isBlank()) {
+
+                                progressLabel.setText(rawLine);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onCompleted(Path producedFile) {
+                        SwingUtilities.invokeLater(() -> {
+                            usingYtDlp = false;
+                            currentYtHandle = null;
+                            setInputsEnabled(true);
+                            cancelButton.setEnabled(false);
+
+                            progressBar.setIndeterminate(false);
+                            progressBar.setValue(100);
+                            progressBar.setString("100%");
+                            progressLabel.setText("Selesai");
+
+                            showStatus(
+                                    "Unduhan selesai: "
+                                            + (producedFile != null ? producedFile.getFileName() : fileName),
+                                    STATUS_SUCCESS);
+
+                            String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
+                            String dest = (producedFile != null ? producedFile.toString()
+                                    : directory.toString());
+                            addHistoryEntry(fileName, format, dest, completedAt, "Berhasil");
+
+                            resetDownloadState();
+                        });
+                    }
+
+                    @Override
+                    public void onCancelled() {
+                        SwingUtilities.invokeLater(() -> {
+                            usingYtDlp = false;
+                            currentYtHandle = null;
+                            setInputsEnabled(true);
+                            cancelButton.setEnabled(false);
+
+                            progressBar.setIndeterminate(false);
+                            progressBar.setValue(0);
+                            progressBar.setString(null);
+                            progressLabel.setText("Unduhan dibatalkan.");
+
+                            showStatus("Unduhan dibatalkan.", TEXT_SECONDARY);
+
+                            String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
+                            addHistoryEntry(fileName, format, directory.toString(), completedAt, "Dibatalkan");
+
+                            resetDownloadState();
+                        });
+                    }
+
+                    @Override
+                    public void onFailed(String message) {
+                        SwingUtilities.invokeLater(() -> {
+                            usingYtDlp = false;
+                            currentYtHandle = null;
+                            setInputsEnabled(true);
+                            cancelButton.setEnabled(false);
+
+                            progressBar.setIndeterminate(false);
+                            progressBar.setValue(0);
+                            progressBar.setString(null);
+                            progressLabel.setText("Unduhan dihentikan.");
+
+                            showStatus(message != null ? message : "Gagal mengunduh via yt-dlp.", STATUS_ERROR);
+
+                            String completedAt = HISTORY_FORMATTER.format(LocalDateTime.now());
+                            addHistoryEntry(fileName, format, directory.toString(), completedAt, "Gagal");
+
+                            resetDownloadState();
+                        });
+                    }
+                };
+
+                String baseNameForDownload = (fileName != null && !fileName.trim().isEmpty()) ? fileName : null;
+
+                if (format.equalsIgnoreCase("mp4")) {
+                    currentYtHandle = YtDlpHelper.downloadMp4(url, directory, baseNameForDownload, ytObs);
+                } else {
+                    currentYtHandle = YtDlpHelper.downloadMp3(url, directory, baseNameForDownload, ytObs);
+                }
+                return;
+            }
         }
 
-        // For non-YouTube URLs, filename is required
         if (fileName.isEmpty()) {
             showStatus("File Name belum diisi.", STATUS_ERROR);
             return;
         }
 
         String extension = (format != null && !format.isBlank()) ? "." + format.trim() : "";
+        // If the user selects PDF, ensure the filename ends with .pdf regardless of
+        // input
+        if ("pdf".equalsIgnoreCase(format)) {
+            extension = ".pdf";
+        }
         Path destination = directory.resolve(fileName + extension);
 
         try {

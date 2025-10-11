@@ -4,16 +4,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -457,52 +458,75 @@ public final class YtDlpHelper {
     }
 
     private static void downloadFileSync(String url, Path destination) throws Exception {
-        final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicReference<Exception> errorRef = new AtomicReference<>();
+        if (destination.getParent() != null) {
+            Files.createDirectories(destination.getParent());
+        }
 
-        FileDownloader.DownloadObserver observer = new FileDownloader.DownloadObserver() {
-            @Override
-            public void onStarted(long totalBytes) {
-                System.out.println("Memulai unduhan yt-dlp (" + formatBytes(totalBytes) + ")...");
+        HttpURLConnection connection = null;
+        InputStream in = null;
+        OutputStream out = null;
+        try {
+            URL target = URI.create(url).toURL();
+            connection = (HttpURLConnection) target.openConnection();
+            connection.setInstanceFollowRedirects(true);
+            connection.setConnectTimeout(15_000);
+            connection.setReadTimeout(30_000);
+            connection.connect();
+
+            int status = connection.getResponseCode();
+            if (status >= 400) {
+                throw new IOException("Server returned HTTP " + status);
             }
 
-            @Override
-            public void onProgress(long downloadedBytes, long totalBytes) {
+            long totalBytes = connection.getContentLengthLong();
+            System.out.println("Memulai unduhan yt-dlp (" + formatBytes(totalBytes) + ")...");
+
+            in = connection.getInputStream();
+            out = Files.newOutputStream(destination);
+
+            byte[] buffer = new byte[32 * 1024];
+            long downloaded = 0;
+            int read;
+            int lastDecile = -1; // print every 10%
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+                downloaded += read;
                 if (totalBytes > 0) {
-                    int percent = (int) ((downloadedBytes * 100) / totalBytes);
-                    if (percent % 10 == 0) {
-                        System.out.println("Unduhan: " + percent + "% (" + formatBytes(downloadedBytes) + " / "
-                                + formatBytes(totalBytes) + ")");
+                    int percent = (int) ((downloaded * 100) / totalBytes);
+                    int dec = percent / 10;
+                    if (dec != lastDecile) {
+                        System.out.println(
+                                "Unduhan: " + percent + "% (" + formatBytes(downloaded) + " / "
+                                        + formatBytes(totalBytes) + ")");
+                        lastDecile = dec;
                     }
                 }
             }
 
-            @Override
-            public void onCompleted(Path file) {
-                System.out.println("Unduhan yt-dlp selesai!");
-                latch.countDown();
+            out.flush();
+            System.out.println("Unduhan yt-dlp selesai!");
+        } catch (IOException e) {
+            try {
+                Files.deleteIfExists(destination);
+            } catch (IOException ignored) {
             }
-
-            @Override
-            public void onCancelled(Path partialFile) {
-                errorRef.set(new Exception("Unduhan dibatalkan"));
-                latch.countDown();
+            throw e;
+        } finally {
+            if (out != null) {
+                try {
+                    out.close();
+                } catch (IOException ignored) {
+                }
             }
-
-            @Override
-            public void onFailed(DownloadError error, Exception exception) {
-                errorRef.set(new Exception("Gagal mengunduh yt-dlp: " + error.toUserMessage(), exception));
-                latch.countDown();
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (IOException ignored) {
+                }
             }
-        };
-
-        FileDownloader.download(url, destination, observer);
-
-        latch.await();
-
-        Exception error = errorRef.get();
-        if (error != null) {
-            throw error;
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 
