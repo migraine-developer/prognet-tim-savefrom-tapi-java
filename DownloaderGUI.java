@@ -645,6 +645,7 @@ public class DownloaderGUI extends JFrame {
             showStatus("File Path belum diisi.", STATUS_ERROR);
             return;
         }
+        // File name is now optional - will use video title if empty for YouTube URLs
 
         Path directory;
         try {
@@ -669,7 +670,8 @@ public class DownloaderGUI extends JFrame {
             return;
         }
 
-        // For YouTube URLs, we might not have a filename yet (will be extracted from title)
+        // For YouTube URLs, we might not have a filename yet (will be extracted from
+        // title)
         if (YtDlpHelper.isYouTube(url) && (format != null)
                 && (format.equalsIgnoreCase("mp4") || format.equalsIgnoreCase("mp3"))) {
 
@@ -800,7 +802,7 @@ public class DownloaderGUI extends JFrame {
             };
 
             String baseNameForDownload = (fileName != null && !fileName.trim().isEmpty()) ? fileName : null;
-            
+
             if (format.equalsIgnoreCase("mp4")) {
                 currentYtHandle = YtDlpHelper.downloadMp4(url, directory, baseNameForDownload, ytObs);
             } else {
@@ -865,8 +867,6 @@ public class DownloaderGUI extends JFrame {
 
         currentDownload = FileDownloader.download(url, destination, observer);
     }
-
-
 
     private void prepareUiForDownload() {
         setInputsEnabled(false);
