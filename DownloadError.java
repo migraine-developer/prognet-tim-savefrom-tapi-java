@@ -1,7 +1,3 @@
-/**
- * Enumerates download error categories that the UI can reason about without
- * tying the implementation to any specific provider (e.g. YouTube).
- */
 public enum DownloadError {
     NETWORK_INTERRUPTED,
     INSUFFICIENT_STORAGE,

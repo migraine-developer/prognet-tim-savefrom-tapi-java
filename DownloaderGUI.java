@@ -645,7 +645,6 @@ public class DownloaderGUI extends JFrame {
             showStatus("File Path belum diisi.", STATUS_ERROR);
             return;
         }
-        // File name is now optional - will use video title if empty for YouTube URLs
 
         Path directory;
         try {

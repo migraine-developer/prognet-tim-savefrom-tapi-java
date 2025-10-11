@@ -59,10 +59,10 @@ public final class YtDlpHelper {
             cmd.add(findYtDlpCommand());
             cmd.add("--get-title");
             cmd.add(url);
-            
+
             ProcessBuilder pb = new ProcessBuilder(cmd);
             Process process = pb.start();
-            
+
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String title = reader.readLine();
                 if (title != null && !title.trim().isEmpty()) {
@@ -70,35 +70,35 @@ public final class YtDlpHelper {
                     return sanitizeFilename(title.trim());
                 }
             }
-            
+
             process.waitFor(10, TimeUnit.SECONDS);
         } catch (Exception e) {
             System.err.println("Failed to extract video title: " + e.getMessage());
         }
-        
+
         return null;
     }
-    
+
     private static String sanitizeFilename(String filename) {
         if (filename == null) {
             return "video";
         }
-        
+
         // Remove or replace invalid filename characters
         String sanitized = filename.replaceAll("[<>:\"/\\\\|?*]", "_")
-                                  .replaceAll("\\s+", " ")
-                                  .trim();
-        
+                .replaceAll("\\s+", " ")
+                .trim();
+
         // Limit length to avoid filesystem issues
         if (sanitized.length() > 100) {
             sanitized = sanitized.substring(0, 100).trim();
         }
-        
+
         // Ensure it's not empty
         if (sanitized.isEmpty()) {
             sanitized = "video";
         }
-        
+
         return sanitized;
     }
 
@@ -107,7 +107,7 @@ public final class YtDlpHelper {
         if (baseName == null || baseName.trim().isEmpty()) {
             return downloadWithTitleExtraction(url, outDir, "mp4", obs);
         }
-        
+
         List<String> cmd = new ArrayList<>();
         cmd.add(findYtDlpCommand());
         cmd.add("-f");
@@ -126,7 +126,7 @@ public final class YtDlpHelper {
         if (baseName == null || baseName.trim().isEmpty()) {
             return downloadWithTitleExtraction(url, outDir, "mp3", obs);
         }
-        
+
         List<String> cmd = new ArrayList<>();
         cmd.add(findYtDlpCommand());
         cmd.add("-x");
@@ -155,7 +155,7 @@ public final class YtDlpHelper {
                 if (title == null) {
                     title = "video_" + System.currentTimeMillis();
                 }
-                
+
                 if (obs != null) {
                     obs.onTitleExtracted(title);
                 }
@@ -163,7 +163,7 @@ public final class YtDlpHelper {
                 // Now download with the extracted title
                 List<String> cmd = new ArrayList<>();
                 cmd.add(findYtDlpCommand());
-                
+
                 if ("mp4".equals(format)) {
                     cmd.add("-f");
                     cmd.add("bv*+ba/b");
@@ -176,17 +176,17 @@ public final class YtDlpHelper {
                     cmd.add("--audio-quality");
                     cmd.add("0");
                 }
-                
+
                 cmd.add("-o");
                 cmd.add(outDir.resolve(title + ".%(ext)s").toString());
                 cmd.add(url);
-                
+
                 Path producedFile = outDir.resolve(title + "." + format);
-                
+
                 // Start the actual download
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.redirectErrorStream(true);
-                
+
                 Process process = pb.start();
                 holder.process = process;
                 holder.processInput = process.getInputStream();
@@ -215,7 +215,7 @@ public final class YtDlpHelper {
                 } else if (obs != null) {
                     obs.onFailed("yt-dlp gagal (exit code " + code + ")");
                 }
-                
+
             } catch (IOException e) {
                 holder.done = true;
                 if (holder.cancelled) {

@@ -21,14 +21,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * A thin utility responsible for downloading arbitrary files from a supplied
- * URL to a destination on disk. The class deliberately knows nothing about the
- * source of the content (YouTube, Vimeo, etc.); it simply streams bytes.
- */
 public final class FileDownloader {
 
-    private static final int BUFFER_SIZE = 32 * 1024; // 32 KB
+    private static final int BUFFER_SIZE = 32 * 1024;
 
     private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
         private int counter = 0;
@@ -42,7 +37,7 @@ public final class FileDownloader {
     });
 
     private FileDownloader() {
-        // utility
+
     }
 
     public static DownloadHandle download(String url, Path destination, DownloadObserver observer) {
@@ -209,7 +204,7 @@ public final class FileDownloader {
             try {
                 Files.deleteIfExists(destination);
             } catch (IOException ignored) {
-                // Best-effort cleanup.
+
             }
         }
 
