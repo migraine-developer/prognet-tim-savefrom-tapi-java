@@ -4,10 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -58,76 +54,60 @@ public final class YtDlpHelper {
     }
 
     public static String extractVideoTitle(String url) {
-        if (url == null || !isYouTube(url)) return null;
-
-        HttpURLConnection conn = null;
         try {
-            String api = "https://www.youtube.com/oembed?url="
-                    + URLEncoder.encode(url, StandardCharsets.UTF_8.name())
-                    + "&format=json";
-
-            conn = (HttpURLConnection) URI.create(api).toURL().openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(8_000);
-            conn.setReadTimeout(8_000);
-            conn.setInstanceFollowRedirects(true);
-
-            int code = conn.getResponseCode();
-            if (code >= 400) return null;
-
-            StringBuilder sb = new StringBuilder(1024);
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line);
-            }
-
-            Matcher m = Pattern.compile("\"title\"\\s*:\\s*\"(.*?)\"", Pattern.DOTALL).matcher(sb.toString());
-            if (m.find()) {
-                String title = m.group(1)
-                        .replace("\\\"", "\"")
-                        .replace("\\n", " ")
-                        .replace("\\r", " ")
-                        .replace("\\t", " ")
-                        .replace("\\u0026", "&")
-                        .trim();
-
-                if (!title.isEmpty()) {
-                    return sanitizeFilename(title);
+            List<String> cmd = new ArrayList<>();
+            cmd.add(findYtDlpCommand());
+            cmd.add("--get-title");
+            cmd.add(url);
+            
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            Process process = pb.start();
+            
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String title = reader.readLine();
+                if (title != null && !title.trim().isEmpty()) {
+                    // Sanitize filename
+                    return sanitizeFilename(title.trim());
                 }
             }
-        } catch (Exception ignore) {
-        } finally {
-            if (conn != null) conn.disconnect();
+            
+            process.waitFor(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            System.err.println("Failed to extract video title: " + e.getMessage());
         }
+        
         return null;
     }
-
+    
     private static String sanitizeFilename(String filename) {
         if (filename == null) {
             return "video";
         }
-
+        
+        // Remove or replace invalid filename characters
         String sanitized = filename.replaceAll("[<>:\"/\\\\|?*]", "_")
-                .replaceAll("\\s+", " ")
-                .trim();
-
+                                  .replaceAll("\\s+", " ")
+                                  .trim();
+        
+        // Limit length to avoid filesystem issues
         if (sanitized.length() > 100) {
             sanitized = sanitized.substring(0, 100).trim();
         }
-
+        
+        // Ensure it's not empty
         if (sanitized.isEmpty()) {
             sanitized = "video";
         }
-
+        
         return sanitized;
     }
 
     public static Handle downloadMp4(String url, Path outDir, String baseName, Observer obs) {
+        // If baseName is null or empty, extract title first
         if (baseName == null || baseName.trim().isEmpty()) {
             return downloadWithTitleExtraction(url, outDir, "mp4", obs);
         }
-
+        
         List<String> cmd = new ArrayList<>();
         cmd.add(findYtDlpCommand());
         cmd.add("-f");
@@ -142,10 +122,11 @@ public final class YtDlpHelper {
     }
 
     public static Handle downloadMp3(String url, Path outDir, String baseName, Observer obs) {
+        // If baseName is null or empty, extract title first
         if (baseName == null || baseName.trim().isEmpty()) {
             return downloadWithTitleExtraction(url, outDir, "mp3", obs);
         }
-
+        
         List<String> cmd = new ArrayList<>();
         cmd.add(findYtDlpCommand());
         cmd.add("-x");
@@ -169,18 +150,20 @@ public final class YtDlpHelper {
             }
 
             try {
+                // First, extract the title
                 String title = extractVideoTitle(url);
                 if (title == null) {
                     title = "video_" + System.currentTimeMillis();
                 }
-
+                
                 if (obs != null) {
                     obs.onTitleExtracted(title);
                 }
 
+                // Now download with the extracted title
                 List<String> cmd = new ArrayList<>();
                 cmd.add(findYtDlpCommand());
-
+                
                 if ("mp4".equals(format)) {
                     cmd.add("-f");
                     cmd.add("bv*+ba/b");
@@ -193,16 +176,17 @@ public final class YtDlpHelper {
                     cmd.add("--audio-quality");
                     cmd.add("0");
                 }
-
+                
                 cmd.add("-o");
                 cmd.add(outDir.resolve(title + ".%(ext)s").toString());
                 cmd.add(url);
-
+                
                 Path producedFile = outDir.resolve(title + "." + format);
-
+                
+                // Start the actual download
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.redirectErrorStream(true);
-
+                
                 Process process = pb.start();
                 holder.process = process;
                 holder.processInput = process.getInputStream();
@@ -231,7 +215,7 @@ public final class YtDlpHelper {
                 } else if (obs != null) {
                     obs.onFailed("yt-dlp gagal (exit code " + code + ")");
                 }
-
+                
             } catch (IOException e) {
                 holder.done = true;
                 if (holder.cancelled) {
